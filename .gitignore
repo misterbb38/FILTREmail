@@ -1,0 +1,6 @@
+.env
+venv/
+processed_emails.json
+email_classifier.log
+__pycache__/
+*.pyc
