@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}FILTREmail Админ{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">FILTREmail Админ</div>
+        <div class="nav-links">
+            <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Статистика</a>
+            <a href="{{ url_for('emails_list') }}" class="{% if request.endpoint == 'emails_list' %}active{% endif %}">Письма</a>
+            <a href="{{ url_for('feedbacks_list') }}" class="{% if request.endpoint == 'feedbacks_list' %}active{% endif %}">Обратная связь</a>
+            <a href="{{ url_for('export_csv') }}" class="btn-export">Экспорт CSV</a>
+        </div>
+    </nav>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

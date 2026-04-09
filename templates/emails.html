@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Письма — FILTREmail Админ{% endblock %}
+
+{% block content %}
+<h1>Классифицированные письма ({{ total }})</h1>
+
+<!-- Фильтры -->
+<form class="filters" method="get">
+    <select name="mailbox">
+        <option value="">Все ящики</option>
+        {% for mb in mailboxes %}
+        <option value="{{ mb }}" {% if mailbox_filter == mb %}selected{% endif %}>{{ mb }}</option>
+        {% endfor %}
+    </select>
+
+    <select name="status">
+        <option value="">Все статусы ИИ</option>
+        <option value="order" {% if status_filter == 'order' %}selected{% endif %}>Заявки</option>
+        <option value="not_order" {% if status_filter == 'not_order' %}selected{% endif %}>Не заявки</option>
+    </select>
+
+    <select name="admin">
+        <option value="">Все вердикты админа</option>
+        <option value="correct" {% if admin_filter == 'correct' %}selected{% endif %}>ИИ верно</option>
+        <option value="incorrect" {% if admin_filter == 'incorrect' %}selected{% endif %}>ИИ ошибся</option>
+        <option value="unverified" {% if admin_filter == 'unverified' %}selected{% endif %}>Не проверено</option>
+    </select>
+
+    <label class="filter-date-label">С:
+        <input type="date" name="date_from" value="{{ date_from }}">
+    </label>
+    <label class="filter-date-label">По:
+        <input type="date" name="date_to" value="{{ date_to }}">
+    </label>
+
+    <button type="submit" class="btn">Фильтровать</button>
+    <a href="{{ url_for('emails_list') }}" class="btn btn-secondary">Сбросить</a>
+</form>
+
+<!-- Таблица -->
+<table>
+    <thead>
+        <tr>
+            <th>Дата</th>
+            <th>Кому (ящик)</th>
+            <th>Отправитель</th>
+            <th>Тема</th>
+            <th>ИИ</th>
+            <th>Уверенность</th>
+            <th>Админ</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for e in emails %}
+        {% set fb = feedback_map.get(e.uid) %}
+        <tr class="{% if fb %}{% if fb.ai_was_correct %}row-correct{% else %}row-incorrect{% endif %}{% else %}row-unverified{% endif %}">
+            <td class="nowrap">{{ e.processed_at.strftime('%d/%m %H:%M') if e.processed_at else '' }}</td>
+            <td>{{ e.mailbox | default('') }}</td>
+            <td class="truncate" title="{{ e.sender | default('') }}">{{ e.sender | default('') }}</td>
+            <td class="truncate" title="{{ e.subject | default('') }}">{{ e.subject | default('') }}</td>
+            <td>
+                {% if e.is_order %}
+                <span class="badge badge-green">Заявка</span>
+                {% else %}
+                <span class="badge badge-gray">Нет</span>
+                {% endif %}
+            </td>
+            <td>{{ "%.0f"|format(e.confidence * 100) if e.confidence else 0 }}%</td>
+            <td>
+                {% if fb %}
+                    {% if fb.ai_was_correct %}
+                    <span class="badge badge-green">Верно</span>
+                    {% else %}
+                    <span class="badge badge-red">Ошибка</span>
+                    {% endif %}
+                {% else %}
+                <span class="badge badge-outline">?</span>
+                {% endif %}
+            </td>
+            <td><a href="{{ url_for('email_detail', uid=e.uid) }}" class="btn btn-small">Открыть</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Пагинация -->
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}&mailbox={{ mailbox_filter }}&status={{ status_filter }}&admin={{ admin_filter }}&date_from={{ date_from }}&date_to={{ date_to }}" class="btn btn-small">&laquo; Назад</a>
+    {% endif %}
+    <span>Страница {{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}&mailbox={{ mailbox_filter }}&status={{ status_filter }}&admin={{ admin_filter }}&date_from={{ date_from }}&date_to={{ date_to }}" class="btn btn-small">Далее &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

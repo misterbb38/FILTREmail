@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Статистика — FILTREmail Админ{% endblock %}
+
+{% block content %}
+<h1>Статистика</h1>
+
+<!-- Карточки статистики -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-number">{{ total_all }}</div>
+        <div class="stat-label">Писем обработано (всего)</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ total_today }}</div>
+        <div class="stat-label">Сегодня</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ total_week }}</div>
+        <div class="stat-label">За 7 дней</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ total_month }}</div>
+        <div class="stat-label">За 30 дней</div>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card accent-green">
+        <div class="stat-number">{{ orders_all }}</div>
+        <div class="stat-label">Заявок обнаружено</div>
+    </div>
+    <div class="stat-card accent-gray">
+        <div class="stat-number">{{ not_orders_all }}</div>
+        <div class="stat-label">Не заявки</div>
+    </div>
+    <div class="stat-card {% if accuracy >= 80 %}accent-green{% elif accuracy >= 60 %}accent-orange{% else %}accent-red{% endif %}">
+        <div class="stat-number">{{ "%.1f"|format(accuracy) }}%</div>
+        <div class="stat-label">Точность ИИ ({{ correct_feedbacks }}/{{ total_feedbacks }} проверок)</div>
+    </div>
+    <div class="stat-card accent-orange">
+        <div class="stat-number">{{ unverified_count }}</div>
+        <div class="stat-label">Не проверено</div>
+    </div>
+</div>
+
+<!-- Графики -->
+<div class="charts-grid">
+    <div class="chart-container">
+        <h3>Письма / Заявки по дням (7 дней)</h3>
+        <canvas id="dailyChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h3>Распределение по ящикам</h3>
+        <canvas id="mailboxChart"></canvas>
+    </div>
+</div>
+
+<script>
+new Chart(document.getElementById('dailyChart'), {
+    type: 'bar',
+    data: {
+        labels: {{ daily_labels | tojson }},
+        datasets: [
+            {
+                label: 'Всего писем',
+                data: {{ daily_total | tojson }},
+                backgroundColor: 'rgba(99, 102, 241, 0.3)',
+                borderColor: 'rgb(99, 102, 241)',
+                borderWidth: 1,
+            },
+            {
+                label: 'Заявки',
+                data: {{ daily_orders | tojson }},
+                backgroundColor: 'rgba(34, 197, 94, 0.5)',
+                borderColor: 'rgb(34, 197, 94)',
+                borderWidth: 1,
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+    }
+});
+
+new Chart(document.getElementById('mailboxChart'), {
+    type: 'doughnut',
+    data: {
+        labels: {{ mailbox_stats | map(attribute='_id') | list | tojson }},
+        datasets: [{
+            data: {{ mailbox_stats | map(attribute='count') | list | tojson }},
+            backgroundColor: ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'],
+        }]
+    },
+    options: { responsive: true }
+});
+</script>
+{% endblock %}

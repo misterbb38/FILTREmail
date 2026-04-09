@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Письмо — {{ email.subject | default('Без темы') }}{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('emails_list') }}" class="btn btn-secondary">&larr; Назад к списку</a>
+
+<div class="email-detail">
+    <h1>{{ email.subject | default('(без темы)') }}</h1>
+
+    <div class="email-meta">
+        <div class="meta-row">
+            <span class="meta-label">Ящик:</span>
+            <span>{{ email.mailbox | default('') }}</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">От:</span>
+            <span>{{ email.sender | default('') }}</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span>{{ email.processed_at.strftime('%d/%m/%Y %H:%M') if email.processed_at else '' }}</span>
+        </div>
+        {% if email.attachments %}
+        <div class="meta-row">
+            <span class="meta-label">Вложения:</span>
+            <span>{{ email.attachments | join(', ') }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Классификация ИИ -->
+    <div class="classification-box">
+        <h3>Вердикт ИИ</h3>
+        <div class="verdict-row">
+            {% if email.is_order %}
+            <span class="badge badge-green badge-large">ЗАЯВКА КЛИЕНТА</span>
+            {% else %}
+            <span class="badge badge-gray badge-large">НЕ ЗАЯВКА</span>
+            {% endif %}
+            <span class="confidence">Уверенность: {{ "%.0f"|format(email.confidence * 100) if email.confidence else 0 }}%</span>
+        </div>
+        <p class="reason">{{ email.reason | default('') }}</p>
+    </div>
+
+    <!-- Предпросмотр текста -->
+    {% if email.body_preview %}
+    <div class="body-preview">
+        <h3>Текст письма</h3>
+        <pre>{{ email.body_preview }}</pre>
+    </div>
+    {% endif %}
+
+    <!-- Существующая обратная связь -->
+    {% if feedback %}
+    <div class="feedback-existing {% if feedback.ai_was_correct %}feedback-correct{% else %}feedback-incorrect{% endif %}">
+        <h3>Обратная связь админа</h3>
+        <p>
+            Вердикт админа:
+            {% if feedback.admin_verdict %}
+            <span class="badge badge-green">Это заявка</span>
+            {% else %}
+            <span class="badge badge-red">Это НЕ заявка</span>
+            {% endif %}
+        </p>
+        <p>
+            ИИ был:
+            {% if feedback.ai_was_correct %}
+            <span class="badge badge-green">Прав</span>
+            {% else %}
+            <span class="badge badge-red">Неправ</span>
+            {% endif %}
+        </p>
+        {% if feedback.admin_note %}
+        <p><strong>Заметка:</strong> {{ feedback.admin_note }}</p>
+        {% endif %}
+        <p class="feedback-date">Дата: {{ feedback.created_at.strftime('%d/%m/%Y %H:%M') if feedback.created_at else '' }}</p>
+    </div>
+    {% endif %}
+
+    <!-- Форма обратной связи -->
+    <div class="feedback-form">
+        <h3>{% if feedback %}Изменить обратную связь{% else %}Дать обратную связь{% endif %}</h3>
+        <form method="post" action="{{ url_for('submit_feedback', uid=email.uid) }}">
+            <div class="form-group">
+                <label>Это письмо действительно является заявкой клиента?</label>
+                <div class="radio-group">
+                    <label class="radio-label">
+                        <input type="radio" name="admin_verdict" value="true"
+                               {% if feedback and feedback.admin_verdict %}checked{% endif %}>
+                        Да, это заявка
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="admin_verdict" value="false"
+                               {% if feedback and not feedback.admin_verdict %}checked{% endif %}>
+                        Нет, это НЕ заявка
+                    </label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="admin_note">Заметка (необязательно — помогает ИИ учиться):</label>
+                <textarea name="admin_note" id="admin_note" rows="3"
+                          placeholder="Пример: Это был поставщик, который отвечал на наш запрос...">{{ feedback.admin_note if feedback else '' }}</textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

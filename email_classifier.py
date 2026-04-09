@@ -484,7 +484,7 @@
 #     try:
 #         mail.select(SOURCE_FOLDER)
 
-#         status, message_ids = mail.uid("SEARCH", None, f"(UNSEEN SINCE {today_imap})")
+#         status, message_ids = mail.uid("SEARCH", None, f"(SINCE {today_imap})")
 
 #         if status != "OK":
 #             log.error(f"  Ошибка поиска писем в {mailbox_login}")
@@ -838,7 +838,8 @@ def is_processed(col, uid_key: str) -> bool:
 
 
 def mark_processed(col, uid_key: str, mailbox: str, sender: str, subject: str,
-                   is_order: bool, confidence: float, reason: str):
+                   is_order: bool, confidence: float, reason: str,
+                   body_preview: str = "", attachments: list[str] | None = None):
     try:
         col.update_one(
             {"uid": uid_key},
@@ -850,6 +851,8 @@ def mark_processed(col, uid_key: str, mailbox: str, sender: str, subject: str,
                 "is_order":     is_order,
                 "confidence":   confidence,
                 "reason":       reason,
+                "body_preview": body_preview[:500] if body_preview else "",
+                "attachments":  attachments or [],
                 "processed_at": datetime.utcnow(),
             }},
             upsert=True,
@@ -1084,6 +1087,68 @@ CLASSIFICATION_USER_PROMPT = """Проанализируй это письмо.
 ПОДСКАЗКА: Если не уверен — ставь confidence ниже 0.5 и is_order: false."""
 
 
+def get_recent_mistakes(limit: int = 5) -> list[dict]:
+    """
+    Recupere les derniers feedbacks ou l'IA s'est trompee.
+    Utilise une connexion MongoDB fraiche.
+    """
+    try:
+        col = get_processed_collection()
+        db = col.database
+        feedbacks_col = db["feedbacks"]
+        mistakes = list(feedbacks_col.find(
+            {"ai_was_correct": False},
+            {"_id": 0, "uid": 1, "admin_verdict": 1, "admin_note": 1},
+        ).sort("created_at", -1).limit(limit))
+
+        if not mistakes:
+            return []
+
+        # Enrichir avec les donnees de l'email original
+        processed_col = db["processed_emails"]
+        enriched = []
+        for m in mistakes:
+            email_doc = processed_col.find_one({"uid": m["uid"]})
+            if email_doc:
+                enriched.append({
+                    "sender":        email_doc.get("sender", ""),
+                    "subject":       email_doc.get("subject", ""),
+                    "ai_said_order": email_doc.get("is_order", False),
+                    "correct_answer": m.get("admin_verdict", False),
+                    "admin_note":    m.get("admin_note", ""),
+                })
+        return enriched
+
+    except Exception as e:
+        log.warning(f"  Impossible de charger les feedbacks: {e}")
+        return []
+
+
+def format_feedback_examples(mistakes: list[dict]) -> str:
+    """Formate les erreurs passees pour injection dans le prompt."""
+    if not mistakes:
+        return ""
+
+    lines = [
+        "",
+        "═══════════════════════════════════════",
+        "ПРИМЕРЫ ПРОШЛЫХ ОШИБОК (учись на этих исправлениях):",
+        "═══════════════════════════════════════",
+    ]
+    for i, m in enumerate(mistakes, 1):
+        ai_label = "заявка клиента" if m["ai_said_order"] else "НЕ заявка"
+        correct_label = "is_order: true" if m["correct_answer"] else "is_order: false"
+        lines.append(f"""
+Пример {i}:
+  От: {m['sender']}
+  Тема: {m['subject']}
+  ИИ сказал: {ai_label} (НЕВЕРНО)
+  Заметка админа: {m['admin_note'] or 'нет'}
+  → Правильный ответ: {correct_label}""")
+
+    return "\n".join(lines)
+
+
 def classify_email(subject: str, sender: str, body: str,
                    attachments: list[str], mailbox_email: str) -> dict:
     body_truncated  = body[:3000] if body else "(пусто)"
@@ -1096,6 +1161,13 @@ def classify_email(subject: str, sender: str, body: str,
         attachments=attachments_str,
         body=body_truncated,
     )
+
+    # Injecter les exemples d'erreurs passees (feedback admin)
+    mistakes = get_recent_mistakes(limit=5)
+    feedback_section = format_feedback_examples(mistakes)
+    if feedback_section:
+        user_prompt += feedback_section
+        log.info(f"    📝 {len(mistakes)} exemple(s) de feedback injecte(s) dans le prompt")
 
     try:
         response = ai_client.chat.completions.create(
@@ -1155,7 +1227,7 @@ def process_mailbox(mailbox_login: str, mailbox_password: str) -> dict:
             stats["errors"] = 1
             return stats
 
-        # ── Recherche emails du jour non lus ──
+        # ── Recherche tous les emails du jour ──
         today_imap = date.today().strftime("%d-%b-%Y")
         status, message_ids = mail.uid("SEARCH", None, f"(UNSEEN SINCE {today_imap})")
 
@@ -1166,10 +1238,10 @@ def process_mailbox(mailbox_login: str, mailbox_password: str) -> dict:
 
         uids = message_ids[0].split() if message_ids[0] else []
         if not uids:
-            log.info("  ✓ Aucun nouvel email aujourd'hui")
+            log.info("  ✓ Aucun email aujourd'hui")
             return stats
 
-        log.info(f"  Trouvés : {len(uids)} emails non lus aujourd'hui")
+        log.info(f"  Trouvés : {len(uids)} emails aujourd'hui")
 
         # ── Filtrage et chargement ──
         limit          = len(uids) if TEST_MODE else MAX_EMAILS_PER_RUN
@@ -1237,7 +1309,8 @@ def process_mailbox(mailbox_login: str, mailbox_password: str) -> dict:
                 log.info(f"    ⬜ Pas une commande ({confidence:.0%}) — {reason}")
 
             mark_processed(col, uid_key, mailbox_login, sender, subject,
-                           is_order, confidence, reason)
+                           is_order, confidence, reason,
+                           body_preview=body, attachments=attachments)
             stats["processed"] += 1
 
         # ── Suppression définitive des emails déplacés ──

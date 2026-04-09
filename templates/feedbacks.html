@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Обратная связь — FILTREmail Админ{% endblock %}
+
+{% block content %}
+<h1>Обратная связь</h1>
+
+<!-- Статистика точности -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-number">{{ total_feedbacks }}</div>
+        <div class="stat-label">Всего проверок</div>
+    </div>
+    <div class="stat-card accent-green">
+        <div class="stat-number">{{ correct }}</div>
+        <div class="stat-label">ИИ верно</div>
+    </div>
+    <div class="stat-card accent-red">
+        <div class="stat-number">{{ incorrect }}</div>
+        <div class="stat-label">ИИ ошибся</div>
+    </div>
+    <div class="stat-card {% if accuracy >= 80 %}accent-green{% elif accuracy >= 60 %}accent-orange{% else %}accent-red{% endif %}">
+        <div class="stat-number">{{ "%.1f"|format(accuracy) }}%</div>
+        <div class="stat-label">Точность</div>
+    </div>
+</div>
+
+<h2>Последние проверки</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Дата</th>
+            <th>Ящик</th>
+            <th>Отправитель</th>
+            <th>Тема</th>
+            <th>ИИ сказал</th>
+            <th>Вердикт админа</th>
+            <th>ИИ прав?</th>
+            <th>Заметка</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for fb in feedbacks %}
+        <tr class="{% if fb.ai_was_correct %}row-correct{% else %}row-incorrect{% endif %}">
+            <td class="nowrap">{{ fb.created_at.strftime('%d/%m %H:%M') if fb.created_at else '' }}</td>
+            <td>{{ fb.mailbox | default('') }}</td>
+            <td class="truncate" title="{{ fb.sender | default('') }}">{{ fb.sender | default('') }}</td>
+            <td class="truncate" title="{{ fb.subject | default('') }}">{{ fb.subject | default('') }}</td>
+            <td>
+                {% if fb.ai_said_order %}
+                <span class="badge badge-green">Заявка</span>
+                {% else %}
+                <span class="badge badge-gray">Нет</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if fb.admin_verdict %}
+                <span class="badge badge-green">Заявка</span>
+                {% else %}
+                <span class="badge badge-red">Не заявка</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if fb.ai_was_correct %}
+                <span class="badge badge-green">Да</span>
+                {% else %}
+                <span class="badge badge-red">Нет</span>
+                {% endif %}
+            </td>
+            <td class="truncate" title="{{ fb.admin_note | default('') }}">{{ fb.admin_note | default('') }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
