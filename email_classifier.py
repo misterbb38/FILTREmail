@@ -716,7 +716,16 @@ MONGO_TIMEOUT_MS     = 10_000      # 10 secondes timeout MongoDB
 
 TARGET_FOLDER        = "Заявки"
 SOURCE_FOLDER        = "INBOX"
+SPAM_FOLDER          = "Спам"
 MAX_EMAILS_PER_RUN   = 50
+
+# Отправители, чьи письма нужно вытаскивать из спама в основную папку
+# (банки, госуслуги и т.д.) — список через запятую в .env
+WHITELIST_SENDERS = [
+    s.strip().lower()
+    for s in os.getenv("WHITELIST_SENDERS", "noreply@alfabank.ru").split(",")
+    if s.strip()
+]
 
 DRY_RUN              = os.getenv("DRY_RUN", "false").lower() == "true"
 CHECK_INTERVAL       = int(os.getenv("CHECK_INTERVAL", "120"))
@@ -1015,6 +1024,65 @@ def move_email(mail: imaplib.IMAP4_SSL, uid: bytes, target_folder: str) -> bool:
         return False
 
 
+def rescue_from_spam(mail: imaplib.IMAP4_SSL, mailbox_login: str) -> int:
+    """
+    Scanne le dossier Spam, deplace les emails des expediteurs whitelistes
+    (banques, etc.) vers l'INBOX. Retourne le nombre d'emails sauves.
+    """
+    if not WHITELIST_SENDERS:
+        return 0
+
+    rescued = 0
+    try:
+        encoded_spam = encode_imap_utf7(SPAM_FOLDER)
+        status, _ = mail.select(encoded_spam)
+        if status != "OK":
+            log.warning(f"  ⚠ Impossible d'ouvrir le dossier '{SPAM_FOLDER}'")
+            return 0
+
+        today_imap = date.today().strftime("%d-%b-%Y")
+        status, message_ids = mail.uid("SEARCH", None, f"(SINCE {today_imap})")
+        if status != "OK" or not message_ids[0]:
+            return 0
+
+        uids = message_ids[0].split()
+        log.info(f"  🔍 Спам: {len(uids)} писем за сегодня — проверяем whitelist")
+
+        for uid in uids:
+            msg = fetch_email_by_uid(mail, uid)
+            if msg is None:
+                continue
+
+            sender = decode_mime_header(msg.get("From", ""))
+            sender_email = extract_email_address(sender)
+
+            if any(w in sender_email for w in WHITELIST_SENDERS):
+                if DRY_RUN:
+                    log.info(f"  [DRY_RUN] Спасли бы из спама: {sender_email}")
+                    continue
+                try:
+                    result = mail.uid("COPY", uid, "INBOX")
+                    if result[0] == "OK":
+                        mail.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+                        log.info(f"  💌 Спасено из спама: {sender_email} → INBOX")
+                        rescued += 1
+                    else:
+                        log.warning(f"  ⚠ Не удалось переместить из спама: {result}")
+                except Exception as e:
+                    log.warning(f"  ⚠ Ошибка перемещения из спама: {e}")
+
+        if rescued > 0:
+            try:
+                mail.expunge()
+            except Exception:
+                pass
+
+    except Exception as e:
+        log.warning(f"  ⚠ Ошибка обработки спама: {e}")
+
+    return rescued
+
+
 # ─────────────────────────────────────────────
 # CLASSIFICATION DEEPSEEK
 # ─────────────────────────────────────────────
@@ -1220,6 +1288,11 @@ def process_mailbox(mailbox_login: str, mailbox_password: str) -> dict:
         return stats
 
     try:
+        # ── Sauvetage des emails whitelistes depuis le Spam ──
+        rescued = rescue_from_spam(mail, mailbox_login)
+        if rescued > 0:
+            log.info(f"  ✓ {rescued} письмо(а) спасено из спама")
+
         # ── Sélection dossier source ──
         status, _ = mail.select(SOURCE_FOLDER)
         if status != "OK":
