@@ -716,7 +716,8 @@ MONGO_TIMEOUT_MS     = 10_000      # 10 secondes timeout MongoDB
 
 TARGET_FOLDER        = "Заявки"
 SOURCE_FOLDER        = "INBOX"
-SPAM_FOLDER          = "Спам"
+# Имя папки спама зависит от ящика — пробуем по очереди
+SPAM_FOLDER_CANDIDATES = ["Спам", "Spam", "Junk", "JUNK"]
 MAX_EMAILS_PER_RUN   = 50
 
 # Отправители, чьи письма нужно вытаскивать из спама в основную папку
@@ -1024,6 +1025,35 @@ def move_email(mail: imaplib.IMAP4_SSL, uid: bytes, target_folder: str) -> bool:
         return False
 
 
+def find_spam_folder(mail: imaplib.IMAP4_SSL) -> str | None:
+    """Cherche le nom reel du dossier Spam parmi les candidats connus."""
+    for candidate in SPAM_FOLDER_CANDIDATES:
+        encoded = encode_imap_utf7(candidate)
+        status, _ = mail.select(encoded, readonly=True)
+        if status == "OK":
+            return candidate
+    # Fallback : lister tous les dossiers et chercher un nom contenant "spam"/"спам"/"junk"
+    try:
+        status, folders = mail.list()
+        if status == "OK":
+            for f in folders:
+                if not isinstance(f, bytes):
+                    continue
+                line = f.decode("utf-8", errors="ignore").lower()
+                if "junk" in line or "spam" in line or "&" in line:
+                    # Extraire le nom du dossier (entre guillemets a la fin)
+                    parts = f.decode("utf-8", errors="ignore").rsplit('"', 2)
+                    if len(parts) >= 2:
+                        folder_name = parts[-2]
+                        # Tester si on peut le selectionner
+                        status2, _ = mail.select(folder_name, readonly=True)
+                        if status2 == "OK" and ("junk" in folder_name.lower() or "spam" in folder_name.lower() or "&BCEEPg" in folder_name):
+                            return folder_name
+    except Exception:
+        pass
+    return None
+
+
 def rescue_from_spam(mail: imaplib.IMAP4_SSL, mailbox_login: str) -> int:
     """
     Scanne le dossier Spam, deplace les emails des expediteurs whitelistes
@@ -1034,10 +1064,15 @@ def rescue_from_spam(mail: imaplib.IMAP4_SSL, mailbox_login: str) -> int:
 
     rescued = 0
     try:
-        encoded_spam = encode_imap_utf7(SPAM_FOLDER)
+        spam_folder = find_spam_folder(mail)
+        if spam_folder is None:
+            log.warning(f"  ⚠ Папка спама не найдена для {mailbox_login}")
+            return 0
+
+        encoded_spam = encode_imap_utf7(spam_folder)
         status, _ = mail.select(encoded_spam)
         if status != "OK":
-            log.warning(f"  ⚠ Impossible d'ouvrir le dossier '{SPAM_FOLDER}'")
+            log.warning(f"  ⚠ Impossible d'ouvrir le dossier '{spam_folder}'")
             return 0
 
         today_imap = date.today().strftime("%d-%b-%Y")
